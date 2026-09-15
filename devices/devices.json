@@ -1,0 +1,10 @@
+[
+  {
+    "name": "google-dns",
+    "host": "8.8.8.8"
+  },
+  {
+    "name": "youtube",
+    "host": "youtube.com"
+  }
+]
