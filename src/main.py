@@ -1,64 +1,106 @@
+import os
 from datetime import datetime
-from network import ping_host, resolve_host, check_port, check_web, check_ssh, check_dns
 from devices import load_devices
+from network import ping_host, resolve_host, check_port, check_service
 
-devices = load_devices('devices/devices.json')
-log_path = 'logs/network_log.txt'
+def format_header(current_time):
+    return (
+        "NetOps Lab - Device Status\n"
+        f"Checked: {current_time}\n"
+        "--------------------------"
+    )
 
-print('NetOps Lab - Device Status')
-current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-print(f'Checked at: {current_time}')
-print('--------------------------')
+def format_device_status(name, host, port, service, ip_address, status, latency, port_status, service_status):
+    if ip_address == host:
+        address_line = f'  IP/Host: {ip_address}'
+    else:
+        address_line = f'  Host: {host}\n  IP: {ip_address}'
 
-up_count = 0
-down_count = 0
+    return (
+        f'{name} ({service})\n'
+        f'{address_line}\n'
+        f'  Ping: {status} ({latency} ms)\n'
+        f'  Port {port}: {port_status}\n'
+        f'  {service}: {service_status}\n'
+    )
 
-with open(log_path, "a") as log_file:
-    for device in devices:
-        name = device["name"]
-        host = device["host"]
-        port = device["port"]
-        service = device["service"]
+def format_log_line(current_time, name, host, port, service, ip_address, status, latency, port_status, service_status):
+    if ip_address == host:
+        address = f'IP/Host: {ip_address} ({service})'
+    else:
+        address = f'{host} ({service}) | IP: {ip_address}'
 
-        if service == 'HTTPS':
-            web_status = check_web(host)
-        else:
-            web_status = None
+    return (
+        f'{current_time} | {name} | {address} | Ping: {status} ({latency} ms) | Port {port}: {port_status} | {service}: {service_status}'
+    )
 
-        if service == 'SSH':
-            ssh_status = check_ssh(host, port)
-        else:
-            ssh_status = None
+def update_summary_counts(status, port_status, service, service_status, ping_up_count, port_open_count, service_up_count):
+    if status == "UP":
+        ping_up_count += 1
 
-        if service == 'DNS':
-            dns_status = check_dns(host)
-        else:
-            dns_status = None
+    if port_status == "OPEN":
+        port_open_count += 1
 
-        ip_address = resolve_host(host)
-        status, latency = ping_host(host)
-        port_status = check_port(host, port)
+    # Determine service health based on the expected result for each service type
+    if service == "HTTPS":
+        if isinstance(service_status, int) and 200 <= service_status < 400:
+            service_up_count += 1
 
-        if status == 'UP':
-            up_count += 1
-        else:
-            down_count += 1
+    elif service == "SSH":
+        if service_status == "AVAILABLE":
+            service_up_count += 1
 
-        if ip_address == host:
-            log_line = f'{current_time} | {name} | IP/host: {ip_address} ({service}) | Ping: {status} ({latency} ms) | Port {port}: {port_status}'
-        else:
-            log_line = f'{current_time} | {name} | {host} ({service}) | IP: {ip_address} | Ping: {status} ({latency} ms) | Port {port}: {port_status}'
+    elif service == "DNS":
+        if service_status == "RESPONDING":
+            service_up_count += 1
 
-        if web_status is not None:
-            log_line += f' | HTTP: {web_status}'
+    return ping_up_count, port_open_count, service_up_count
 
-        if ssh_status is not None:
-            log_line += f' | SSH: {ssh_status}'
+def summary(total_devices, ping_up_count, port_open_count, service_up_count):
+    return (
+        "Summary:\n"
+        f"  Devices checked: {total_devices}\n"
+        f"  Ping successful: {ping_up_count}/{total_devices}\n"
+        f"  Ports open: {port_open_count}/{total_devices}\n"
+        f"  Services healthy: {service_up_count}/{total_devices}"
+    )
 
-        if dns_status is not None:
-            log_line += f' | DNS: {dns_status}'
+def main(): 
+    devices = load_devices('devices/devices.json')
 
-        print(log_line)
-        log_file.write(log_line + "\n")
+    # Makes "logs" path automatically 
+    os.makedirs('logs', exist_ok=True)
+    log_path = 'logs/network_log.txt'
 
-print(f'\nSummary: {up_count} UP | {down_count} DOWN')
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    ping_up_count = 0
+    port_open_count = 0
+    service_up_count = 0
+
+    print(format_header(current_time))
+
+    with open(log_path, "a") as log_file:
+        for device in devices:
+            name = device["name"]
+            host = device["host"]
+            port = device["port"]
+            service = device["service"]
+
+            ip_address = resolve_host(host)
+            status, latency = ping_host(host)
+            port_status = check_port(host, port)
+            service_status = check_service(host, port, service)
+
+            print(format_device_status(name, host, port, service, ip_address, status, latency, port_status, service_status))
+
+            ping_up_count, port_open_count, service_up_count = update_summary_counts(status, port_status, service, service_status, ping_up_count, port_open_count, service_up_count)
+
+            log_line = format_log_line(current_time, name, host, port, service, ip_address, status, latency, port_status, service_status)
+
+            log_file.write(log_line + "\n")
+
+    print(summary(len(devices), ping_up_count, port_open_count, service_up_count))
+
+if __name__ == '__main__':
+    main()
